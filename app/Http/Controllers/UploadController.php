@@ -1,7 +1,9 @@
 <?php
 
 namespace App\Http\Controllers;
+use App\Models\Image;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
 
 class UploadController extends Controller
@@ -24,7 +26,13 @@ $file = $request->file('image');
 
 $path = $file->store('images','r2');
 
-// // Get the URL of the uploaded file
+// Saves the information in the database associating it with the authenticated user
+$image = Image::create([
+    'user_id' => Auth::id(), 
+    'path'    => $path,
+]);
+
+// Get the URL of the uploaded file
 
 $url = Storage::disk('r2')->url($path);
 
@@ -32,6 +40,7 @@ return response()->json([
     'message' => 'Image uploaded successfully',
     'path' => $path,
     'url' => $url,
+    'image'   => $image,
 ]);
 
 }
