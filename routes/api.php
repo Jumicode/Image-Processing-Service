@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\ImageController;
+use App\Http\Controllers\ImageTransformController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -14,6 +15,7 @@ Route::middleware('auth:api')->group(function (){
 
 Route::post('upload', [UploadController::class, 'upload']); // Upload Image
 Route::post('my-images',[ImageController::class,'index']); // get all images
+Route::post('/images/{id}/transform', [ImageTransformController::class, 'transform']);
 Route::post('logout', [AuthController::class, 'logout']);
 Route::post('me', [AuthController::class, 'me']);
 
