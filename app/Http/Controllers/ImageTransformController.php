@@ -11,73 +11,111 @@ class ImageTransformController extends Controller
 {
     public function transform(Request $request, $id)
     {
-        // Find the image and verify that the user has permissions
+        // 1. Find the image and verify that the user has permissions
         $imageRecord = Image::findOrFail($id);
         if ($imageRecord->user_id !== Auth::id()) {
-            return response()->json(['error' => 'No autorizado'], 403);
+            return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        // Validate input: an object is expected "transformations" with "resize"
+        // 2.Validate the input for resize and crop. Use "sometimes" to allow both or just one to be sent.
         $request->validate([
-            'transformations.resize.width'  => 'required|integer|min:1',
-            'transformations.resize.height' => 'required|integer|min:1',
+            'transformations.resize.width'  => 'sometimes|required|integer|min:1',
+            'transformations.resize.height' => 'sometimes|required|integer|min:1',
+            'transformations.crop.width'    => 'sometimes|required|integer|min:1',
+            'transformations.crop.height'   => 'sometimes|required|integer|min:1',
+            'transformations.crop.x'        => 'sometimes|required|integer|min:0',
+            'transformations.crop.y'        => 'sometimes|required|integer|min:0',
         ]);
 
-        $targetWidth  = $request->input('transformations.resize.width');
-        $targetHeight = $request->input('transformations.resize.height');
-
-        // Download the image content from Cloudflare R2
+        // 3. Download the image content from R2 and create the GD resource
         $contents = Storage::disk('r2')->get($imageRecord->path);
-
-        // Create image resource from content (supports JPEG, PNG, GIF, etc.)
-        $srcImage = imagecreatefromstring($contents);
-        if (!$srcImage) {
-            return response()->json(['error' => 'No se pudo procesar la imagen'], 500);
+        $imageResource = imagecreatefromstring($contents);
+        if (!$imageResource) {
+            return response()->json(['error' => 'The image could not be processed'], 500);
         }
 
-        // Get original dimensions
-        $origWidth  = imagesx($srcImage);
-        $origHeight = imagesy($srcImage);
+        // Variable where the modified resource will be stored
+        $transformedImage = $imageResource;
 
-        // Avoid upsize: new values ​​are not allowed to be larger than the original ones
-        $targetWidth  = min($targetWidth, $origWidth);
-        $targetHeight = min($targetHeight, $origHeight);
+        // 4. Apply resize transformation (if provided)
+        if ($request->has('transformations.resize')) {
+            $resizeWidth  = $request->input('transformations.resize.width');
+            $resizeHeight = $request->input('transformations.resize.height');
 
-        // Calculate the new dimension while maintaining the aspect ratio
-        $ratioOrig = $origWidth / $origHeight;
-        if (($targetWidth / $targetHeight) > $ratioOrig) {
-            $targetWidth = $targetHeight * $ratioOrig;
-        } else {
-            $targetHeight = $targetWidth / $ratioOrig;
+            // Get original dimensions of the current image (can be the original or already transformed)
+            $origWidth  = imagesx($transformedImage);
+            $origHeight = imagesy($transformedImage);
+
+            // Prevent upsize: do not allow the image to be enlarged
+            $resizeWidth  = min($resizeWidth, $origWidth);
+            $resizeHeight = min($resizeHeight, $origHeight);
+
+            // Calculate the new dimension while maintaining the aspect ratio
+            $ratioOrig = $origWidth / $origHeight;
+            if (($resizeWidth / $resizeHeight) > $ratioOrig) {
+                $resizeWidth = $resizeHeight * $ratioOrig;
+            } else {
+                $resizeHeight = $resizeWidth / $ratioOrig;
+            }
+            $resizeWidth  = (int) $resizeWidth;
+            $resizeHeight = (int) $resizeHeight;
+
+            // Create a resized temporary image
+            $resizedImage = imagecreatetruecolor($resizeWidth, $resizeHeight);
+            imagecopyresampled($resizedImage, $transformedImage, 0, 0, 0, 0, $resizeWidth, $resizeHeight, $origWidth, $origHeight);
+
+            // Release the old resource if it will no longer be used (optional)
+            if ($transformedImage !== $imageResource) {
+                imagedestroy($transformedImage);
+            }
+            $transformedImage = $resizedImage;
         }
-        // Convert to integers
-        $targetWidth  = (int) $targetWidth;
-        $targetHeight = (int) $targetHeight;
 
-        // Create a blank image with the new dimensions
-        $dstImage = imagecreatetruecolor($targetWidth, $targetHeight);
+        // 5. Apply crop transformation (if provided)
+        if ($request->has('transformations.crop')) {
+            $cropData = $request->input('transformations.crop');
+            $cropWidth  = $cropData['width'];
+            $cropHeight = $cropData['height'];
+            $cropX      = $cropData['x'];
+            $cropY      = $cropData['y'];
 
-        // Resize the image
-        imagecopyresampled($dstImage, $srcImage, 0, 0, 0, 0, $targetWidth, $targetHeight, $origWidth, $origHeight);
+            // The cropping area is defined
+            $cropRect = [
+                'x' => $cropX,
+                'y' => $cropY,
+                'width'  => $cropWidth,
+                'height' => $cropHeight,
+            ];
 
-        // Save the resized image to a temporary file
+            // Apply crop using imagecrop
+            $croppedImage = imagecrop($transformedImage, $cropRect);
+            if ($croppedImage !== false) {
+                // Release the previous resource if it is different
+                imagedestroy($transformedImage);
+                $transformedImage = $croppedImage;
+            } else {
+                return response()->json(['error' => 'No se pudo recortar la imagen. Verifica los parámetros de crop.'], 500);
+            }
+        }
+
+        // 6. Save the transformed image to a temporary file
         $newFilename = 'transformed_' . basename($imageRecord->path);
         $tempPath = sys_get_temp_dir() . '/' . $newFilename;
-        // We use imagejpeg; if the image is of another type, it must be adjusted
-        imagejpeg($dstImage, $tempPath, 90); // 90% Quality
+        // We assume JPEG; if the original image is of another type, it must be adapted
+        imagejpeg($transformedImage, $tempPath, 90);
 
-        // Free memory
-        imagedestroy($srcImage);
-        imagedestroy($dstImage);
+        // Free memory from GD resources
+        imagedestroy($imageResource);
+        imagedestroy($transformedImage);
 
-        // Upload the transformed image to Cloudflare R2 (optional: you can replace the original or save it separately)
+        // 7. Upload the transformed image to Cloudflare R2
         $newPath = 'images/' . $newFilename;
         Storage::disk('r2')->put($newPath, file_get_contents($tempPath));
 
         // Delete the temporary file
         unlink($tempPath);
 
-        // Get the URL of the transformed image
+        // 8. Generate the URL and respond
         $url = Storage::disk('r2')->url($newPath);
 
         return response()->json([
