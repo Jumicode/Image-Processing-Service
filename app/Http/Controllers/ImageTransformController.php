@@ -25,6 +25,7 @@ class ImageTransformController extends Controller
             'transformations.crop.height'   => 'sometimes|required|integer|min:1',
             'transformations.crop.x'        => 'sometimes|required|integer|min:0',
             'transformations.crop.y'        => 'sometimes|required|integer|min:0',
+            'transformations.rotate'        => 'sometimes|required|numeric'
         ]);
 
         // 3. Download the image content from R2 and create the GD resource
@@ -94,28 +95,45 @@ class ImageTransformController extends Controller
                 imagedestroy($transformedImage);
                 $transformedImage = $croppedImage;
             } else {
-                return response()->json(['error' => 'No se pudo recortar la imagen. Verifica los parámetros de crop.'], 500);
+                return response()->json(['error' => 'The image could not be cropped. Check the crop settings..'], 500);
             }
         }
 
-        // 6. Save the transformed image to a temporary file
+          // 6. Apply rotate transformation (if provided)
+         if($request->has('transformations.rotate')) {
+            $angle = $request->input('transformations.rotate');
+
+          //A black background (0) is set for the uncovered areas and the image is flipped counterclockwise.
+           $rotatedImage = Imagerotate($transformedImage, $angle, 0);
+
+           if ($rotatedImage !== false)  { 
+            imagedestroy($transformedImage);
+            $transformedImage = $rotatedImage;
+           } else {
+         return response()->json(['error' => 'Could not rotate image' ], 500);
+           }
+
+        }
+          
+
+
+        // 7. Save the transformed image to a temporary file
         $newFilename = 'transformed_' . basename($imageRecord->path);
         $tempPath = sys_get_temp_dir() . '/' . $newFilename;
-        // We assume JPEG; if the original image is of another type, it must be adapted
         imagejpeg($transformedImage, $tempPath, 90);
 
         // Free memory from GD resources
         imagedestroy($imageResource);
         imagedestroy($transformedImage);
 
-        // 7. Upload the transformed image to Cloudflare R2
+        // 8. Upload the transformed image to Cloudflare R2
         $newPath = 'images/' . $newFilename;
         Storage::disk('r2')->put($newPath, file_get_contents($tempPath));
 
         // Delete the temporary file
         unlink($tempPath);
 
-        // 8. Generate the URL and respond
+        // 9. Generate the URL and respond
         $url = Storage::disk('r2')->url($newPath);
 
         return response()->json([
