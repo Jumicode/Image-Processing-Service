@@ -25,7 +25,8 @@ class ImageTransformController extends Controller
             'transformations.crop.height'   => 'sometimes|required|integer|min:1',
             'transformations.crop.x'        => 'sometimes|required|integer|min:0',
             'transformations.crop.y'        => 'sometimes|required|integer|min:0',
-            'transformations.rotate'        => 'sometimes|required|numeric'
+            'transformations.rotate'        => 'sometimes|required|numeric',
+            'transformations.format'        => 'sometimes|required|string'
         ]);
 
         // 3. Download the image content from R2 and create the GD resource
@@ -114,13 +115,39 @@ class ImageTransformController extends Controller
            }
 
         }
+
+    // 7. Apply format transformation (if provided)
+   // If not specified, JPEG will be used by default.   
+        $format = 'jpeg';
+        if ($request->has('transformations.format')) {
+            $requestedFormat = strtolower($request->input('transformations.format'));
+            $allowedFormats = ['jpeg', 'jpg', 'png', 'gif'];
+            if (!in_array($requestedFormat, $allowedFormats)) {
+                return response()->json(['error' => 'Formato no soportado.'], 400);
+            }
+            // We consider "jpg" as "jpeg"
+            $format = $requestedFormat === 'jpg' ? 'jpeg' : $requestedFormat;
+        }
+
+        $newFilename = 'transformed_' . pathinfo($imageRecord->path, PATHINFO_FILENAME) . '.' . $format;
+        $tempPath = sys_get_temp_dir() . '/' . $newFilename;
           
 
+        switch ($format) {
+            case 'jpeg':
+                imagejpeg($transformedImage, $tempPath, 90);
+                break;
+            case 'png':
+                imagepng($transformedImage, $tempPath);
+                break;
+            case 'gif':
+                imagegif($transformedImage, $tempPath);
+                break;
+            default:
+               // This shouldn't happen due to pre-validation
+                return response()->json(['error' => 'Formato no soportado.'], 400);
+        }
 
-        // 7. Save the transformed image to a temporary file
-        $newFilename = 'transformed_' . basename($imageRecord->path);
-        $tempPath = sys_get_temp_dir() . '/' . $newFilename;
-        imagejpeg($transformedImage, $tempPath, 90);
 
         // Free memory from GD resources
         imagedestroy($imageResource);
