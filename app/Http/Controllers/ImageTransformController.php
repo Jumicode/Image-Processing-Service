@@ -28,7 +28,8 @@ class ImageTransformController extends Controller
             'transformations.rotate'        => 'sometimes|required|numeric',
             'transformations.format'        => 'sometimes|required|string',
             'transformations.filters.grayscale' => 'sometimes|required|boolean',
-            'transformations.filters.sepia'     => 'sometimes|required|boolean'
+            'transformations.filters.sepia'     => 'sometimes|required|boolean',
+            'transformations.compress'          => 'sometimes|required|integer|min:0|max:100'
         ]);
 
         // 3. Download the image content from R2 and create the GD resource
@@ -144,38 +145,46 @@ class ImageTransformController extends Controller
             $format = $requestedFormat === 'jpg' ? 'jpeg' : $requestedFormat;
         }
 
-        $newFilename = 'transformed_' . pathinfo($imageRecord->path, PATHINFO_FILENAME) . '.' . $format;
-        $tempPath = sys_get_temp_dir() . '/' . $newFilename;
-          
+    // 9. Get compression value (if sent, otherwise use default value)
+    $compressQuality = 90;
+    if ($request->has('transformations.compress')) {
+        $compressQuality = $request->input('transformations.compress');
+    }
 
-        switch ($format) {
-            case 'jpeg':
-                imagejpeg($transformedImage, $tempPath, 90);
-                break;
-            case 'png':
-                imagepng($transformedImage, $tempPath);
-                break;
-            case 'gif':
-                imagegif($transformedImage, $tempPath);
-                break;
-            default:
-               // This shouldn't happen due to pre-validation
-                return response()->json(['error' => 'Formato no soportado.'], 400);
-        }
+    // 10. Save the transformed image to a temporary file, applying compression
+    $newFilename = 'transformed_' . pathinfo($imageRecord->path, PATHINFO_FILENAME) . '.' . $format;
+    $tempPath    = sys_get_temp_dir() . '/' . $newFilename;
+
+    switch ($format) {
+        case 'jpeg':
+            imagejpeg($transformedImage, $tempPath, $compressQuality);
+            break;
+        case 'png':
+            // For PNGs, compression is a level between 0 (no compression) and 9 (maximum compression).
+             // Convert the value from 0-100 to 0-9 (where 100 = 0 and 0 = 9).
+            $pngCompression = (int) round((100 - $compressQuality) * 9 / 100);
+            imagepng($transformedImage, $tempPath, $pngCompression);
+            break;
+        case 'gif':
+            imagegif($transformedImage, $tempPath);
+            break;
+        default:
+            return response()->json(['error' => 'Formato no soportado.'], 400);
+    }
 
 
         // Free memory from GD resources
         imagedestroy($imageResource);
         imagedestroy($transformedImage);
 
-        // 9. Upload the transformed image to Cloudflare R2
+        // 11. Upload the transformed image to Cloudflare R2
         $newPath = 'images/' . $newFilename;
         Storage::disk('r2')->put($newPath, file_get_contents($tempPath));
 
         // Delete the temporary file
         unlink($tempPath);
 
-        // 10. Generate the URL and respond
+        // 12. Generate the URL and respond
         $url = Storage::disk('r2')->url($newPath);
 
         return response()->json([
