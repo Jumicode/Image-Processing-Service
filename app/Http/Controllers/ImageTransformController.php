@@ -26,7 +26,9 @@ class ImageTransformController extends Controller
             'transformations.crop.x'        => 'sometimes|required|integer|min:0',
             'transformations.crop.y'        => 'sometimes|required|integer|min:0',
             'transformations.rotate'        => 'sometimes|required|numeric',
-            'transformations.format'        => 'sometimes|required|string'
+            'transformations.format'        => 'sometimes|required|string',
+            'transformations.filters.grayscale' => 'sometimes|required|boolean',
+            'transformations.filters.sepia'     => 'sometimes|required|boolean'
         ]);
 
         // 3. Download the image content from R2 and create the GD resource
@@ -115,8 +117,21 @@ class ImageTransformController extends Controller
            }
 
         }
+  
+// 7. Apply filters transformation (grayscale and sepia)
 
-    // 7. Apply format transformation (if provided)
+        if ($request->has('transformations.filters')) {
+            $filters = $request->input('transformations.filters');
+            // If sepia is requested, grayscale is applied first and then colorize to simulate the sepia effect.
+            if (isset($filters['sepia']) && $filters['sepia']) {
+                imagefilter($transformedImage, IMG_FILTER_GRAYSCALE);
+                imagefilter($transformedImage, IMG_FILTER_COLORIZE, 90, 60, 40);
+            } elseif (isset($filters['grayscale']) && $filters['grayscale']) {
+                imagefilter($transformedImage, IMG_FILTER_GRAYSCALE);
+            }
+        }
+
+    // 8. Apply format transformation (if provided)
    // If not specified, JPEG will be used by default.   
         $format = 'jpeg';
         if ($request->has('transformations.format')) {
@@ -153,14 +168,14 @@ class ImageTransformController extends Controller
         imagedestroy($imageResource);
         imagedestroy($transformedImage);
 
-        // 8. Upload the transformed image to Cloudflare R2
+        // 9. Upload the transformed image to Cloudflare R2
         $newPath = 'images/' . $newFilename;
         Storage::disk('r2')->put($newPath, file_get_contents($tempPath));
 
         // Delete the temporary file
         unlink($tempPath);
 
-        // 9. Generate the URL and respond
+        // 10. Generate the URL and respond
         $url = Storage::disk('r2')->url($newPath);
 
         return response()->json([
