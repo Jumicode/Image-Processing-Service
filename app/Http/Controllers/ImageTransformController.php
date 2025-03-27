@@ -29,7 +29,11 @@ class ImageTransformController extends Controller
             'transformations.format'        => 'sometimes|required|string',
             'transformations.filters.grayscale' => 'sometimes|required|boolean',
             'transformations.filters.sepia'     => 'sometimes|required|boolean',
-            'transformations.compress'          => 'sometimes|required|integer|min:0|max:100'
+            'transformations.compress'          => 'sometimes|required|integer|min:0|max:100',
+            'transformations.watermark.image'   => 'sometimes|required|url',
+            'transformations.watermark.x'       => 'sometimes|required|integer',
+            'transformations.watermark.y'       => 'sometimes|required|integer',
+            'transformations.watermark.opacity' => 'sometimes|required|integer|min:0|max:100'
         ]);
 
         // 3. Download the image content from R2 and create the GD resource
@@ -132,6 +136,33 @@ class ImageTransformController extends Controller
             }
         }
 
+        if ($request->has('transformations.watermark')) {
+            $wmData = $request->input('transformations.watermark');
+            $watermarkUrl = $wmData['image'];
+            $watermarkX   = $wmData['x'];
+            $watermarkY   = $wmData['y'];
+            $opacity      = $wmData['opacity']; // Value between 0 and 100
+
+           // Load the watermark image
+            $wmContents = file_get_contents($watermarkUrl);
+            if ($wmContents === false) {
+                return response()->json(['error' => 'The watermark image could not be loaded..'], 500);
+            }
+            $watermarkResource = imagecreatefromstring($wmContents);
+            if (!$watermarkResource) {
+                return response()->json(['error' => 'The watermark image could not be loaded..'], 500);
+            }
+
+            // Get watermark dimensions
+            $wmWidth  = imagesx($watermarkResource);
+            $wmHeight = imagesy($watermarkResource);
+
+            // Apply the watermark to the transformed image using imagecopymerge()
+// imagecopymerge() expects the opacity in percentage (where 100 is opaque and 0 is transparent)
+            imagecopymerge($transformedImage, $watermarkResource, $watermarkX, $watermarkY, 0, 0, $wmWidth, $wmHeight, $opacity);
+            imagedestroy($watermarkResource);
+        }
+
     // 8. Apply format transformation (if provided)
    // If not specified, JPEG will be used by default.   
         $format = 'jpeg';
@@ -139,7 +170,7 @@ class ImageTransformController extends Controller
             $requestedFormat = strtolower($request->input('transformations.format'));
             $allowedFormats = ['jpeg', 'jpg', 'png', 'gif'];
             if (!in_array($requestedFormat, $allowedFormats)) {
-                return response()->json(['error' => 'Formato no soportado.'], 400);
+                return response()->json(['error' => 'Unsupported format.'], 400);
             }
             // We consider "jpg" as "jpeg"
             $format = $requestedFormat === 'jpg' ? 'jpeg' : $requestedFormat;
@@ -169,7 +200,7 @@ class ImageTransformController extends Controller
             imagegif($transformedImage, $tempPath);
             break;
         default:
-            return response()->json(['error' => 'Formato no soportado.'], 400);
+            return response()->json(['error' => 'Unsupported format.'], 400);
     }
 
 
