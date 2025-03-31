@@ -1,7 +1,3 @@
-Below is an example of a README in English for your project:
-
----
-
 # Image Transformation API
 
 This project is a backend API built with Laravel that allows users to upload, transform, and manage images using Cloudflare R2 as the storage solution. The API supports several image transformations such as resize, crop, rotate, format conversion, applying filters (grayscale and sepia), compressing, and adding a watermark. Each transformation is applied in a chain according to the request payload.
