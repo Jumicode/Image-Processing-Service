@@ -5,16 +5,27 @@ namespace App\Http\Controllers;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Image;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\Request;
+
 class ImageController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        // Gets only the images of the authenticated user
-        $images = Auth::user()->images;
+    
+        $limit = $request->query('limit', 10);
+        
+        // Get the paginated list of images from the authenticated user
+        $images = Image::where('user_id', Auth::id())
+                        ->paginate($limit);
 
-        return response()->json([
-            'images' => $images,
-        ]);
+        // Add the public URL of the image to each record
+        $images->getCollection()->transform(function ($image) {
+            $image->url = Storage::disk('r2')->url($image->path);
+            return $image;
+        });
+
+        return response()->json($images);
+        
     }
 
     public function show ($id)

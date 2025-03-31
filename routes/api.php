@@ -14,7 +14,7 @@ Route::post('login', [AuthController::class, 'login']);
 Route::middleware('auth:api')->group(function (){
 
 Route::post('upload', [UploadController::class, 'upload']); // Upload Image
-Route::post('my-images',[ImageController::class,'index']); // get all images
+Route::get('/images', [ImageController::class, 'index']);
 Route::get('/images/{id}', [ImageController::class, 'show']);
 Route::post('/images/{id}/transform', [ImageTransformController::class, 'transform']);
 Route::post('logout', [AuthController::class, 'logout']);
