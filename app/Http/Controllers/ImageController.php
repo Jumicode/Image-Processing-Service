@@ -61,6 +61,9 @@ class ImageController extends Controller
  {
 
 $images = Image::where('user_id', Auth::id())->findOrFail($id);
+
+Storage::disk('r2')->delete($images->path);
+
 $images->delete();
 
 return response()->json(['message' => 'Image deleted successfully']);
