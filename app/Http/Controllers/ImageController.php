@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\Image;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\Request;
+use Carbon\Carbon;
+
 
 class ImageController extends Controller
 {
@@ -54,4 +56,14 @@ class ImageController extends Controller
    ]);
 
    }
+
+ public function destroy ($id)
+ {
+
+$images = Image::where('user_id', Auth::id())->findOrFail($id);
+$images->delete();
+
+return response()->json(['message' => 'Image deleted successfully']);
+
+}
 }
